@@ -1,3 +1,5 @@
+![Banner](banner.png)
+
 # misconfig-Auto-Remediator
 A command-line tool that automatically attempts to remediate identified misconfigurations in a configuration file based on pre-defined remediation strategies. It takes the configuration file and a report (from Misconfig-Compliance-Checker) as input and outputs a modified configuration file with corrected settings. Supports dry-run mode. - Focused on Check for misconfigurations in configuration files or infrastructure definitions
 
