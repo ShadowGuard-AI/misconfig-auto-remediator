@@ -34,6 +34,10 @@ def load_config(config_file):
         # Detect the format from the extension, falling back to content, so
         # a JSON config is written back as JSON and not converted to YAML.
         lower = config_file.lower()
+        # The extension wins over the contents whenever there is one.
+        # Only a file with no recognised suffix gets sniffed below, so a
+        # JSON document saved as .yaml is parsed as YAML. YAML accepts
+        # most JSON, which hides that mistake more often than it should.
         if lower.endswith(".json"):
             fmt = "json"
         elif lower.endswith((".yaml", ".yml")):
@@ -54,6 +58,9 @@ def load_config(config_file):
     except FileNotFoundError:
         raise FileNotFoundError(f"Configuration file not found: {config_file}")
     except Exception as e:
+        # Wrapping everything in a plain Exception loses the original
+        # type on the way up. main only needs the message, so that is
+        # acceptable here, but nothing above me can branch on the cause.
         raise Exception(f"Error loading configuration file: {e}")
 
 
@@ -94,6 +101,10 @@ def remediate_misconfiguration(config, misconfiguration):
     Returns:
         bool: True if a value was applied or created, False if skipped.
     """
+    # I log the whole report entry here, suggested value included.
+    # If that value is a password or a key, it lands in the log in
+    # plain text. Anyone running this on a real secret rotation
+    # should treat the log file as sensitive for that reason.
     logging.info(f"Attempting to remediate misconfiguration: {misconfiguration}")
     try:
         # Example Remediation (Replace with actual logic)
@@ -112,12 +123,19 @@ def remediate_misconfiguration(config, misconfiguration):
             logging.warning(f"Configuration is not a mapping. Skipping remediation.")
             return False
 
+        # Splitting on dots is the whole addressing scheme, so a setting
+        # whose own name contains a dot can never be reached by a report
+        # path. It would be read as two nested sections instead.
         parts = path.split(".")
         current = config
 
         for i in range(len(parts) - 1):
             if parts[i] not in current:
                 logging.info(f"Creating missing section '{parts[i]}' for path '{path}'")
+                # I create a missing intermediate section instead of skipping
+                # the entry. A typo in a report path therefore invents a new
+                # branch in the config and writes the value into it, and the run
+                # still counts that as an applied remediation.
                 current[parts[i]] = {}
             if not isinstance(current[parts[i]], dict):
                 logging.warning(f"Path '{path}' passes through a non-mapping value. Skipping remediation.")
@@ -190,6 +208,9 @@ def main():
         report = load_report(report_file)
 
         # Remediate misconfigurations
+        # This assumes the report parsed to a mapping. A report file that
+        # holds a JSON list loads fine in load_report and then fails here
+        # on .get, which the outer handler turns into exit 1.
         misconfigurations = report.get("misconfigurations", [])
         applied = 0
         if not misconfigurations:
@@ -199,6 +220,10 @@ def main():
                 if remediate_misconfiguration(config, misconfiguration):
                     applied += 1
 
+        # Zero applied covers two very different cases and I treat them
+        # the same: an empty report, and a report whose every entry was
+        # skipped as unusable. Neither writes a file, and both exit 1 so
+        # a caller cannot mistake them for a finished remediation.
         if applied == 0:
             logging.error("No remediations were applied. The configuration file was not written.")
             sys.exit(1)
@@ -207,6 +232,9 @@ def main():
         # write is actually going to happen
         if backup and not dry_run:
             backup_file = config_file + ".bak"
+            # The backup name is fixed, so a second backed up run overwrites
+            # the first run's backup. This protects me against the latest
+            # write only, not against a chain of writes.
             shutil.copy2(config_file, backup_file)
             logging.info(f"Backup created: {backup_file}")
 
@@ -222,6 +250,11 @@ def main():
                 output_file_path = output_file
             else:
                 output_file_path = config_file  # Overwrite the original file if no output file is specified
+            # Writing goes through the parsed data, not the original text.
+            # Comments in a YAML config, its spacing, and any key order I did
+            # not preserve are gone in the output. Only the settings survive
+            # the round trip, and anyone adopting this needs to know that
+            # before the first in place run, not after.
             write_config(config, output_file_path, config_type)
             logging.info(f"Remediated configuration written to: {output_file_path}")
 
